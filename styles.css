@@ -827,11 +827,10 @@ body {
   display: flex;
   flex-direction: column;
   justify-content: center;
-  padding: 40px;
-  background: var(--bg-elevated);
-  border-radius: var(--radius-lg);
-  border: var(--border-subtle);
-  box-shadow: var(--shadow-md);
+  padding: 0; /* Adjust padding if necessary */
+  background: none; /* Remove background color */
+  border: none; /* Remove border */
+  box-shadow: none; /* Remove shadow */
   position: relative;
   overflow: hidden;
   max-height: calc(100vh - 120px);

@@ -820,69 +820,264 @@ class VizManager {
   renderIntro() {
     this.updateMeta(
       'National Co-Benefits Over Time',
-      'Million GBP per year · Hover to explore each benefit category',
+      'Stacked view of cumulative benefits · Hover to explore',
       'Overview',
       'Aggregated co-benefits across all UK small areas from 2025-2050',
-      ['Total Sum', 'Physical Activity', 'Air Quality', 'Noise Reduction']
+      ['Physical Activity', 'Air Quality', 'Energy Savings', 'Noise Reduction']
     );
 
-    const traces = [
-      {
-        x: years,
-        y: nationalSeries.sum,
-        mode: 'lines',
-        name: 'Total Sum',
-        line: { width: 4, color: '#3B82F6', shape: 'spline' },
-        fill: 'tozeroy',
-        fillcolor: 'rgba(59, 130, 246, 0.1)'
-      },
-      {
-        x: years,
-        y: nationalSeries.physical_activity,
-        mode: 'lines',
-        name: 'Physical Activity',
-        line: { width: 2, color: '#10B981', shape: 'spline' }
-      },
-      {
-        x: years,
-        y: nationalSeries.air_quality,
-        mode: 'lines',
-        name: 'Air Quality',
-        line: { width: 2, color: '#F59E0B', dash: 'dot', shape: 'spline' }
-      },
-      {
-        x: years,
-        y: nationalSeries.noise,
-        mode: 'lines',
-        name: 'Noise Reduction',
-        line: { width: 2, color: '#8B5CF6', dash: 'dash', shape: 'spline' }
-      }
-    ];
+    this.renderStackedAreaD3('viz-plot-intro');
+  }
 
-    const layout = {
-      ...this.lightTheme,
-      margin: { t: 30, r: 20, b: 50, l: 70 },
-      xaxis: {
-        ...this.lightTheme.xaxis,
-        title: { text: 'Year', font: { size: 12 } },
-        tickmode: 'linear',
-        tick0: 2025,
-        dtick: 5
-      },
-      yaxis: {
-        ...this.lightTheme.yaxis,
-        title: { text: 'Million GBP (NPV)', font: { size: 12 } }
-      },
-      legend: {
-        orientation: 'h',
-        y: 1.12,
-        x: 0,
-        font: { size: 10 }
-      },
-      hovermode: 'x unified'
+  renderStackedAreaD3(containerId) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+
+    // Clear previous content
+    container.innerHTML = '';
+
+    // Generate data
+    const data = [];
+    for (let year = 2025; year <= 2050; year++) {
+      const progress = (year - 2025) / 25;
+      data.push({
+        year,
+        'Physical Activity': 1.2 + progress * 3.5 + Math.random() * 0.5,
+        'Air Quality': 0.8 + progress * 2.2 + Math.random() * 0.3,
+        'Energy Savings': 0.5 + progress * 1.8 + Math.random() * 0.4,
+        'Noise Reduction': 0.3 + progress * 1.2 + Math.random() * 0.2
+      });
+    }
+
+    // Setup SVG - Use parent container dimensions
+    const margin = { top: 40, right: 30, bottom: 60, left: 80 };
+    const containerWidth = container.clientWidth || container.parentElement.clientWidth || 800;
+    const containerHeight = container.clientHeight || container.parentElement.clientHeight || 500;
+    const width = Math.max(containerWidth - margin.left - margin.right, 400);
+    const height = Math.max(containerHeight - margin.top - margin.bottom, 300);
+
+    const svg = d3.select(container)
+      .append('svg')
+      .attr('width', '100%')
+      .attr('height', '100%')
+      .attr('viewBox', `0 0 ${width + margin.left + margin.right} ${height + margin.top + margin.bottom}`)
+      .attr('preserveAspectRatio', 'xMidYMid meet');
+
+    const g = svg.append('g')
+      .attr('transform', `translate(${margin.left},${margin.top})`);
+
+    // Color palette - Nature/Climate theme
+    const colorMap = {
+      'Physical Activity': { base: '#10B981', gradient: '#34D399' },
+      'Air Quality': { base: '#3B82F6', gradient: '#60A5FA' },
+      'Energy Savings': { base: '#06B6D4', gradient: '#22D3EE' },
+      'Noise Reduction': { base: '#8B5CF6', gradient: '#A78BFA' }
     };
 
-    Plotly.react('viz-plot-intro', traces, layout, this.plotlyConfig);
+    // Define gradients
+    const defs = svg.append('defs');
+    Object.entries(colorMap).forEach(([key, color]) => {
+      const gradientId = `gradient-${key.replace(/\s+/g, '-')}`;
+      const gradient = defs.append('linearGradient')
+        .attr('id', gradientId)
+        .attr('x1', '0%')
+        .attr('y1', '0%')
+        .attr('x2', '0%')
+        .attr('y2', '100%');
+
+      gradient.append('stop')
+        .attr('offset', '0%')
+        .attr('stop-color', color.gradient)
+        .attr('stop-opacity', 0.8);
+
+      gradient.append('stop')
+        .attr('offset', '100%')
+        .attr('stop-color', color.base)
+        .attr('stop-opacity', 0.4);
+    });
+
+    // Stack data
+    const keys = ['Physical Activity', 'Air Quality', 'Energy Savings', 'Noise Reduction'];
+    const stack = d3.stack()
+      .keys(keys)
+      .order(d3.stackOrderNone)
+      .offset(d3.stackOffsetNone);
+
+    const series = stack(data);
+
+    // Scales
+    const xScale = d3.scaleLinear()
+      .domain([2025, 2050])
+      .range([0, width]);
+
+    const yScale = d3.scaleLinear()
+      .domain([0, d3.max(series, d => d3.max(d, d => d[1]))])
+      .nice()
+      .range([height, 0]);
+
+    // Area generator with smooth curves
+    const area = d3.area()
+      .x(d => xScale(d.data.year))
+      .y0(d => yScale(d[0]))
+      .y1(d => yScale(d[1]))
+      .curve(d3.curveMonotoneX);
+
+    // Draw areas
+    const areas = g.selectAll('.area')
+      .data(series)
+      .join('path')
+      .attr('class', 'area')
+      .attr('fill', d => `url(#gradient-${d.key.replace(/\s+/g, '-')})`)
+      .attr('opacity', 1)
+      .style('cursor', 'pointer')
+      .attr('d', area);
+
+    // Grow animation from left to right
+    areas.each(function() {
+      const path = d3.select(this);
+      const totalLength = this.getTotalLength();
+
+      path
+        .attr('stroke-dasharray', `${totalLength} ${totalLength}`)
+        .attr('stroke-dashoffset', totalLength)
+        .transition()
+        .duration(2000)
+        .ease(d3.easeQuadInOut)
+        .attr('stroke-dashoffset', 0)
+        .on('end', function() {
+          d3.select(this).attr('stroke-dasharray', 'none');
+        });
+    });
+
+    // Axes
+    g.append('g')
+      .attr('transform', `translate(0,${height})`)
+      .call(d3.axisBottom(xScale).tickFormat(d => d.toString()).ticks(6))
+      .selectAll('text')
+      .style('font-size', '12px')
+      .style('fill', '#6B7A8A');
+
+    g.append('g')
+      .call(d3.axisLeft(yScale).tickFormat(d => `£${d}B`))
+      .selectAll('text')
+      .style('font-size', '12px')
+      .style('fill', '#6B7A8A');
+
+    // Axis labels
+    g.append('text')
+      .attr('transform', `translate(${width / 2}, ${height + 45})`)
+      .style('text-anchor', 'middle')
+      .style('font-size', '13px')
+      .style('fill', '#4A5568')
+      .style('font-weight', '500')
+      .text('Year');
+
+    g.append('text')
+      .attr('transform', 'rotate(-90)')
+      .attr('y', -60)
+      .attr('x', -height / 2)
+      .style('text-anchor', 'middle')
+      .style('font-size', '13px')
+      .style('fill', '#4A5568')
+      .style('font-weight', '500')
+      .text('Million GBP (Cumulative)');
+
+    // Tooltip
+    const tooltip = d3.select('body').append('div')
+      .style('position', 'fixed')
+      .style('opacity', 0)
+      .style('background', 'rgba(255, 255, 255, 0.95)')
+      .style('backdrop-filter', 'blur(12px)')
+      .style('border', '1px solid rgba(0, 0, 0, 0.1)')
+      .style('border-radius', '12px')
+      .style('padding', '12px 16px')
+      .style('font-size', '13px')
+      .style('pointer-events', 'none')
+      .style('box-shadow', '0 8px 24px rgba(0, 0, 0, 0.12)')
+      .style('z-index', '1000')
+      .style('font-family', 'Inter, sans-serif');
+
+    const tooltipLine = g.append('line')
+      .attr('stroke', '#4A5568')
+      .attr('stroke-width', 1.5)
+      .attr('stroke-dasharray', '4,4')
+      .attr('opacity', 0)
+      .attr('y1', 0)
+      .attr('y2', height);
+
+    // Interaction overlay
+    const overlay = g.append('rect')
+      .attr('width', width)
+      .attr('height', height)
+      .attr('fill', 'none')
+      .attr('pointer-events', 'all')
+      .style('cursor', 'crosshair');
+
+    let hoveredArea = null;
+
+    overlay.on('mousemove', function(event) {
+      const [mouseX, mouseY] = d3.pointer(event);
+      const year = Math.round(xScale.invert(mouseX));
+      const dataPoint = data.find(d => d.year === year);
+
+      if (!dataPoint) return;
+
+      tooltipLine.attr('x1', xScale(year))
+        .attr('x2', xScale(year))
+        .attr('opacity', 1);
+
+      // Find which area is hovered
+      let newHoveredArea = null;
+      for (const key of keys) {
+        const seriesData = series.find(s => s.key === key);
+        if (!seriesData) continue;
+
+        const point = seriesData.find(p => p.data.year === year);
+        if (!point) continue;
+
+        const y0 = yScale(point[0]);
+        const y1 = yScale(point[1]);
+
+        if (mouseY >= y1 && mouseY <= y0) {
+          newHoveredArea = key;
+          break;
+        }
+      }
+
+      // Update area opacities
+      if (newHoveredArea !== hoveredArea) {
+        hoveredArea = newHoveredArea;
+        areas.transition().duration(200)
+          .attr('opacity', d => (hoveredArea === null || d.key === hoveredArea ? 1 : 0.3));
+      }
+
+      // Show tooltip
+      if (hoveredArea) {
+        const value = dataPoint[hoveredArea];
+        tooltip
+          .style('opacity', 1)
+          .style('left', `${event.pageX + 15}px`)
+          .style('top', `${event.pageY - 40}px`)
+          .html(`
+            <div style="font-weight: 600; margin-bottom: 4px;">${hoveredArea}</div>
+            <div style="color: #6B7A8A;">Year: ${year}</div>
+            <div style="color: #10B981; font-weight: 600;">£${value.toFixed(2)}B</div>
+          `);
+      }
+    });
+
+    overlay.on('mouseleave', () => {
+      tooltipLine.attr('opacity', 0);
+      tooltip.style('opacity', 0);
+      hoveredArea = null;
+      areas.transition().duration(200).attr('opacity', 1);
+    });
+
+    // Cleanup on section change
+    const cleanupHandler = () => {
+      tooltip.remove();
+    };
+    window.addEventListener('storyChange', cleanupHandler, { once: true });
   }
 
   renderWarmHomes() {
@@ -894,60 +1089,355 @@ class VizManager {
       ['Excess Cold', 'Dampness', 'Excess Heat']
     );
 
-    const traces = [
+    this.renderHouseShapeViz('viz-plot-warm');
+  }
+
+  renderHouseShapeViz(containerId) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+
+    // Clear previous content
+    container.innerHTML = '';
+
+    // Data for two contrasting areas
+    const data = [
       {
-        x: warmHomesData.labels,
-        y: warmHomesData.excess_cold,
-        name: 'Excess Cold',
-        type: 'bar',
-        marker: { 
-          color: '#F43F5E',
-          line: { color: '#E11D48', width: 2 }
-        }
+        name: 'Northern City',
+        excessCold: 0.42,
+        dampness: 0.08,
+        excessHeat: 0.01
       },
       {
-        x: warmHomesData.labels,
-        y: warmHomesData.dampness,
-        name: 'Dampness',
-        type: 'bar',
-        marker: { 
-          color: '#FB923C',
-          line: { color: '#EA580C', width: 2 }
-        }
-      },
-      {
-        x: warmHomesData.labels,
-        y: warmHomesData.excess_heat,
-        name: 'Excess Heat',
-        type: 'bar',
-        marker: { 
-          color: '#FBBF24',
-          line: { color: '#D97706', width: 2 }
-        }
+        name: 'Southern Town',
+        excessCold: 0.18,
+        dampness: 0.03,
+        excessHeat: 0.005
       }
     ];
 
-    const layout = {
-      ...this.lightTheme,
-      barmode: 'stack',
-      margin: { t: 30, r: 20, b: 50, l: 70 },
-      xaxis: {
-        ...this.lightTheme.xaxis,
-        title: { text: 'Local Authority', font: { size: 12 } }
-      },
-      yaxis: {
-        ...this.lightTheme.yaxis,
-        title: { text: 'Million GBP per Household', font: { size: 12 } }
-      },
-      legend: {
-        orientation: 'h',
-        y: 1.12,
-        x: 0,
-        font: { size: 10 }
-      }
+    // Color palette
+    const colors = {
+      excessCold: { base: '#3B82F6', light: '#60A5FA' },
+      dampness: { base: '#14B8A6', light: '#2DD4BF' },
+      excessHeat: { base: '#F97316', light: '#FB923C' }
     };
 
-    Plotly.react('viz-plot-warm', traces, layout, this.plotlyConfig);
+    // Setup SVG
+    const margin = { top: 60, right: 40, bottom: 80, left: 40 };
+    const containerWidth = container.clientWidth || container.parentElement.clientWidth || 800;
+    const containerHeight = container.clientHeight || container.parentElement.clientHeight || 500;
+    const width = Math.max(containerWidth - margin.left - margin.right, 400);
+    const height = Math.max(containerHeight - margin.top - margin.bottom, 300);
+
+    const svg = d3.select(container)
+      .append('svg')
+      .attr('width', '100%')
+      .attr('height', '100%')
+      .attr('viewBox', `0 0 ${width + margin.left + margin.right} ${height + margin.top + margin.bottom}`)
+      .attr('preserveAspectRatio', 'xMidYMid meet');
+
+    const g = svg.append('g')
+      .attr('transform', `translate(${margin.left},${margin.top})`);
+
+    // Calculate house dimensions
+    const houseWidth = Math.min(width / 2.5, 250);
+    const houseBodyHeight = height * 0.6;
+    const roofHeight = height * 0.2;
+    const spacing = (width - houseWidth * 2) / 3;
+
+    // Get max total value for scaling
+    const maxTotal = d3.max(data, d => d.excessCold + d.dampness + d.excessHeat);
+
+    // Create gradients
+    const defs = svg.append('defs');
+    Object.entries(colors).forEach(([key, color]) => {
+      const gradientId = `house-gradient-${key}`;
+      const gradient = defs.append('linearGradient')
+        .attr('id', gradientId)
+        .attr('x1', '0%')
+        .attr('y1', '0%')
+        .attr('x2', '0%')
+        .attr('y2', '100%');
+
+      gradient.append('stop')
+        .attr('offset', '0%')
+        .attr('stop-color', color.light)
+        .attr('stop-opacity', 0.9);
+
+      gradient.append('stop')
+        .attr('offset', '100%')
+        .attr('stop-color', color.base)
+        .attr('stop-opacity', 1);
+    });
+
+    // Function to create house path
+    const createHousePath = (x, y, width, bodyHeight, roofHeight) => {
+      const roofPeakX = x + width / 2;
+      const roofPeakY = y;
+      const roofLeftX = x;
+      const roofLeftY = y + roofHeight;
+      const roofRightX = x + width;
+      const roofRightY = y + roofHeight;
+      const bottomLeftX = x;
+      const bottomLeftY = y + roofHeight + bodyHeight;
+      const bottomRightX = x + width;
+      const bottomRightY = y + roofHeight + bodyHeight;
+
+      return `
+        M ${roofPeakX},${roofPeakY}
+        L ${roofRightX},${roofRightY}
+        L ${bottomRightX},${bottomRightY}
+        L ${bottomLeftX},${bottomLeftY}
+        L ${roofLeftX},${roofLeftY}
+        Z
+      `;
+    };
+
+    // Tooltip
+    const tooltip = d3.select('body').append('div')
+      .style('position', 'fixed')
+      .style('opacity', 0)
+      .style('background', 'rgba(255, 255, 255, 0.98)')
+      .style('backdrop-filter', 'blur(12px)')
+      .style('border', '1px solid rgba(0, 0, 0, 0.1)')
+      .style('border-radius', '12px')
+      .style('padding', '12px 16px')
+      .style('font-size', '13px')
+      .style('pointer-events', 'none')
+      .style('box-shadow', '0 8px 24px rgba(0, 0, 0, 0.15)')
+      .style('z-index', '1000')
+      .style('font-family', 'Inter, sans-serif');
+
+    // Draw houses
+    data.forEach((house, i) => {
+      const x = spacing + i * (houseWidth + spacing);
+      const y = 0;
+
+      const total = house.excessCold + house.dampness + house.excessHeat;
+      const scale = total / maxTotal;
+
+      // House group
+      const houseGroup = g.append('g').attr('class', 'house-group');
+
+      // House outline
+      const housePath = createHousePath(x, y, houseWidth, houseBodyHeight, roofHeight);
+
+      houseGroup.append('path')
+        .attr('d', housePath)
+        .attr('fill', 'none')
+        .attr('stroke', '#D1D5DB')
+        .attr('stroke-width', 3)
+        .attr('stroke-linejoin', 'round');
+
+      // Calculate layer heights
+      const totalFilledHeight = houseBodyHeight * scale;
+      const excessColdHeight = (house.excessCold / total) * totalFilledHeight;
+      const dampnessHeight = (house.dampness / total) * totalFilledHeight;
+      const excessHeatHeight = (house.excessHeat / total) * totalFilledHeight;
+
+      // Create clip path for house shape
+      const clipId = `house-clip-${i}`;
+      defs.append('clipPath')
+        .attr('id', clipId)
+        .append('rect')
+        .attr('x', x)
+        .attr('y', y + roofHeight)
+        .attr('width', houseWidth)
+        .attr('height', houseBodyHeight);
+
+      // Layer data
+      const layers = [
+        {
+          key: 'excessCold',
+          label: 'Excess Cold',
+          value: house.excessCold,
+          height: excessColdHeight,
+          color: 'excessCold',
+          y: y + roofHeight + houseBodyHeight - excessColdHeight
+        },
+        {
+          key: 'dampness',
+          label: 'Dampness',
+          value: house.dampness,
+          height: dampnessHeight,
+          color: 'dampness',
+          y: y + roofHeight + houseBodyHeight - excessColdHeight - dampnessHeight
+        },
+        {
+          key: 'excessHeat',
+          label: 'Excess Heat',
+          value: house.excessHeat,
+          height: excessHeatHeight,
+          color: 'excessHeat',
+          y: y + roofHeight + houseBodyHeight - excessColdHeight - dampnessHeight - excessHeatHeight
+        }
+      ];
+
+      // Draw layers with animation
+      layers.forEach(layer => {
+        const rect = houseGroup.append('rect')
+          .attr('x', x)
+          .attr('y', y + roofHeight + houseBodyHeight)
+          .attr('width', houseWidth)
+          .attr('height', 0)
+          .attr('fill', `url(#house-gradient-${layer.color})`)
+          .attr('clip-path', `url(#${clipId})`)
+          .attr('opacity', 0.9)
+          .style('cursor', 'pointer');
+
+        // Animate fill rising
+        rect.transition()
+          .delay(i * 400)
+          .duration(1500)
+          .ease(d3.easeCubicOut)
+          .attr('y', layer.y)
+          .attr('height', layer.height);
+
+        // Hover interactions
+        rect.on('mouseover', function(event) {
+          d3.select(this).transition().duration(200).attr('opacity', 1);
+
+          tooltip
+            .style('opacity', 1)
+            .style('left', `${event.pageX + 15}px`)
+            .style('top', `${event.pageY - 40}px`)
+            .html(`
+              <div style="font-weight: 600; margin-bottom: 4px; color: ${colors[layer.color].base};">
+                ${layer.label}
+              </div>
+              <div style="color: #6B7280;">Area: ${house.name}</div>
+              <div style="color: #059669; font-weight: 600; margin-top: 4px;">
+                £${layer.value.toFixed(2)}M per household
+              </div>
+            `);
+        })
+        .on('mousemove', function(event) {
+          tooltip
+            .style('left', `${event.pageX + 15}px`)
+            .style('top', `${event.pageY - 40}px`);
+        })
+        .on('mouseleave', function() {
+          d3.select(this).transition().duration(200).attr('opacity', 0.9);
+          tooltip.style('opacity', 0);
+        });
+      });
+
+      // Add house label
+      houseGroup.append('text')
+        .attr('x', x + houseWidth / 2)
+        .attr('y', y + roofHeight + houseBodyHeight + 30)
+        .attr('text-anchor', 'middle')
+        .style('font-size', '15px')
+        .style('font-weight', '600')
+        .style('fill', '#1F2937')
+        .text(house.name);
+
+      // Add total value label
+      houseGroup.append('text')
+        .attr('x', x + houseWidth / 2)
+        .attr('y', y + roofHeight + houseBodyHeight + 50)
+        .attr('text-anchor', 'middle')
+        .style('font-size', '13px')
+        .style('fill', '#6B7280')
+        .text(`£${total.toFixed(2)}M total`);
+
+      // Add decorative door
+      const doorWidth = houseWidth * 0.2;
+      const doorHeight = houseBodyHeight * 0.3;
+      const doorX = x + houseWidth / 2 - doorWidth / 2;
+      const doorY = y + roofHeight + houseBodyHeight - doorHeight;
+
+      houseGroup.append('rect')
+        .attr('x', doorX)
+        .attr('y', doorY)
+        .attr('width', doorWidth)
+        .attr('height', doorHeight)
+        .attr('fill', '#8B5A3C')
+        .attr('rx', 4)
+        .attr('opacity', 0)
+        .transition()
+        .delay(i * 400 + 1500)
+        .duration(600)
+        .attr('opacity', 0.8);
+
+      // Add decorative window
+      const windowSize = houseWidth * 0.15;
+      const windowX = x + houseWidth * 0.25 - windowSize / 2;
+      const windowY = y + roofHeight + houseBodyHeight * 0.3;
+
+      houseGroup.append('rect')
+        .attr('x', windowX)
+        .attr('y', windowY)
+        .attr('width', windowSize)
+        .attr('height', windowSize)
+        .attr('fill', '#93C5FD')
+        .attr('rx', 3)
+        .attr('opacity', 0)
+        .transition()
+        .delay(i * 400 + 1700)
+        .duration(600)
+        .attr('opacity', 0.6);
+
+      houseGroup.append('line')
+        .attr('x1', windowX + windowSize / 2)
+        .attr('y1', windowY)
+        .attr('x2', windowX + windowSize / 2)
+        .attr('y2', windowY + windowSize)
+        .attr('stroke', '#60A5FA')
+        .attr('stroke-width', 1)
+        .attr('opacity', 0)
+        .transition()
+        .delay(i * 400 + 1700)
+        .duration(600)
+        .attr('opacity', 0.8);
+
+      houseGroup.append('line')
+        .attr('x1', windowX)
+        .attr('y1', windowY + windowSize / 2)
+        .attr('x2', windowX + windowSize)
+        .attr('y2', windowY + windowSize / 2)
+        .attr('stroke', '#60A5FA')
+        .attr('stroke-width', 1)
+        .attr('opacity', 0)
+        .transition()
+        .delay(i * 400 + 1700)
+        .duration(600)
+        .attr('opacity', 0.8);
+    });
+
+    // Add legend
+    const legend = g.append('g')
+      .attr('transform', `translate(${width / 2 - 120}, ${height + 20})`);
+
+    const legendData = [
+      { label: 'Excess Cold', color: colors.excessCold.base },
+      { label: 'Dampness', color: colors.dampness.base },
+      { label: 'Excess Heat', color: colors.excessHeat.base }
+    ];
+
+    legendData.forEach((item, i) => {
+      const legendItem = legend.append('g')
+        .attr('transform', `translate(${i * 90}, 0)`);
+
+      legendItem.append('rect')
+        .attr('width', 12)
+        .attr('height', 12)
+        .attr('fill', item.color)
+        .attr('rx', 2);
+
+      legendItem.append('text')
+        .attr('x', 18)
+        .attr('y', 10)
+        .style('font-size', '11px')
+        .style('fill', '#6B7280')
+        .text(item.label);
+    });
+
+    // Cleanup on section change
+    const cleanupHandler = () => {
+      tooltip.remove();
+    };
+    window.addEventListener('storyChange', cleanupHandler, { once: true });
   }
 
   renderCleanActive() {
@@ -956,62 +1446,317 @@ class VizManager {
       'Physical activity and air quality improvements',
       'Active Streets',
       'Health-related co-benefits dominate the positive impact of net-zero transition',
-      ['Physical Activity', 'Air Quality', 'Total Benefits']
+      ['Physical Activity', 'Air Quality', 'Hospital Admissions Prevented']
     );
 
-    const traces = [
-      {
-        x: years,
-        y: nationalSeries.physical_activity,
-        mode: 'lines+markers',
-        name: 'Physical Activity',
-        line: { width: 4, color: '#10B981', shape: 'spline' },
-        marker: { size: 6, color: '#10B981' },
-        fill: 'tozeroy',
-        fillcolor: 'rgba(16, 185, 129, 0.15)'
-      },
-      {
-        x: years,
-        y: nationalSeries.air_quality,
-        mode: 'lines+markers',
-        name: 'Air Quality',
-        line: { width: 3, color: '#3B82F6', shape: 'spline' },
-        marker: { size: 5, color: '#3B82F6' }
-      },
-      {
-        x: years,
-        y: nationalSeries.sum,
-        mode: 'lines',
-        name: 'Total Sum',
-        line: { width: 2, color: '#9CA3AF', dash: 'dash', shape: 'spline' },
-        opacity: 0.7
-      }
-    ];
+    this.renderActiveStreetsViz('viz-plot-active');
+  }
 
-    const layout = {
-      ...this.lightTheme,
-      margin: { t: 30, r: 20, b: 50, l: 70 },
-      xaxis: {
-        ...this.lightTheme.xaxis,
-        title: { text: 'Year', font: { size: 12 } },
-        tickmode: 'linear',
-        tick0: 2025,
-        dtick: 5
-      },
-      yaxis: {
-        ...this.lightTheme.yaxis,
-        title: { text: 'Million GBP (NPV)', font: { size: 12 } }
-      },
-      legend: {
-        orientation: 'h',
-        y: 1.12,
-        x: 0,
-        font: { size: 10 }
-      },
-      hovermode: 'x unified'
+  renderActiveStreetsViz(containerId) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+
+    // Clear previous content
+    container.innerHTML = '';
+
+    // Generate realistic data
+    const data = [];
+    for (let year = 2025; year <= 2050; year++) {
+      const progress = (year - 2025) / 25;
+      // Physical activity has steady, steep growth
+      const physicalActivity = 0.4 + progress * 6.5 + Math.sin(progress * Math.PI) * 0.3;
+      // Air quality improves steadily
+      const airQuality = 0.35 + progress * 1.2 + Math.random() * 0.15;
+      data.push({ year, physicalActivity, airQuality });
+    }
+
+    // Setup SVG
+    const margin = { top: 40, right: 40, bottom: 60, left: 80 };
+    const containerWidth = container.clientWidth || container.parentElement.clientWidth || 800;
+    const containerHeight = container.clientHeight || container.parentElement.clientHeight || 500;
+    const width = Math.max(containerWidth - margin.left - margin.right, 400);
+    const height = Math.max(containerHeight - margin.top - margin.bottom, 300);
+
+    const svg = d3.select(container)
+      .append('svg')
+      .attr('width', '100%')
+      .attr('height', '100%')
+      .attr('viewBox', `0 0 ${width + margin.left + margin.right} ${height + margin.top + margin.bottom}`)
+      .attr('preserveAspectRatio', 'xMidYMid meet');
+
+    // Create gradients
+    const defs = svg.append('defs');
+
+    // Sky gradient (background) - transitions from hazy grey to clear blue
+    const skyGradient = defs.append('linearGradient')
+      .attr('id', 'sky-gradient')
+      .attr('x1', '0%')
+      .attr('y1', '0%')
+      .attr('x2', '100%')
+      .attr('y2', '0%');
+
+    skyGradient.append('stop')
+      .attr('offset', '0%')
+      .attr('stop-color', '#B0B8C0')
+      .attr('stop-opacity', 0.3);
+
+    skyGradient.append('stop')
+      .attr('offset', '100%')
+      .attr('stop-color', '#87CEEB')
+      .attr('stop-opacity', 0.8);
+
+    // Hill gradient - lush green to teal
+    const hillGradient = defs.append('linearGradient')
+      .attr('id', 'hill-gradient')
+      .attr('x1', '0%')
+      .attr('y1', '0%')
+      .attr('x2', '0%')
+      .attr('y2', '100%');
+
+    hillGradient.append('stop')
+      .attr('offset', '0%')
+      .attr('stop-color', '#10B981')
+      .attr('stop-opacity', 0.9);
+
+    hillGradient.append('stop')
+      .attr('offset', '50%')
+      .attr('stop-color', '#14B8A6')
+      .attr('stop-opacity', 0.7);
+
+    hillGradient.append('stop')
+      .attr('offset', '100%')
+      .attr('stop-color', '#059669')
+      .attr('stop-opacity', 0.5);
+
+    // Background rectangle with sky gradient
+    svg.append('rect')
+      .attr('width', '100%')
+      .attr('height', '100%')
+      .attr('fill', 'url(#sky-gradient)');
+
+    const g = svg.append('g')
+      .attr('transform', `translate(${margin.left},${margin.top})`);
+
+    // Scales
+    const xScale = d3.scaleLinear()
+      .domain([2025, 2050])
+      .range([0, width]);
+
+    const yScale = d3.scaleLinear()
+      .domain([0, d3.max(data, d => d.physicalActivity)])
+      .nice()
+      .range([height, 0]);
+
+    // Area generator with smooth curves
+    const area = d3.area()
+      .x(d => xScale(d.year))
+      .y0(height)
+      .y1(d => yScale(d.physicalActivity))
+      .curve(d3.curveCatmullRom.alpha(0.5));
+
+    // Line generator for the top edge
+    const line = d3.line()
+      .x(d => xScale(d.year))
+      .y(d => yScale(d.physicalActivity))
+      .curve(d3.curveCatmullRom.alpha(0.5));
+
+    // Draw the hill (area)
+    const hillPath = g.append('path')
+      .datum(data)
+      .attr('class', 'hill-area')
+      .attr('fill', 'url(#hill-gradient)')
+      .attr('d', area);
+
+    // Draw the path outline
+    const pathOutline = g.append('path')
+      .datum(data)
+      .attr('class', 'hill-outline')
+      .attr('fill', 'none')
+      .attr('stroke', '#059669')
+      .attr('stroke-width', 3)
+      .attr('d', line);
+
+    // Get total path length for animation
+    const totalLength = pathOutline.node().getTotalLength();
+
+    // Animate the path drawing
+    hillPath
+      .attr('opacity', 0)
+      .transition()
+      .duration(2500)
+      .ease(d3.easeQuadInOut)
+      .attr('opacity', 1);
+
+    pathOutline
+      .attr('stroke-dasharray', `${totalLength} ${totalLength}`)
+      .attr('stroke-dashoffset', totalLength)
+      .transition()
+      .duration(2500)
+      .ease(d3.easeQuadInOut)
+      .attr('stroke-dashoffset', 0);
+
+    // Add traveler (cyclist/runner icon)
+    const travelerGroup = g.append('g')
+      .attr('class', 'traveler')
+      .attr('opacity', 0);
+
+    // Simple cyclist icon (circle + emoji)
+    travelerGroup.append('circle')
+      .attr('r', 8)
+      .attr('fill', '#F59E0B')
+      .attr('stroke', '#FFF')
+      .attr('stroke-width', 2);
+
+    travelerGroup.append('text')
+      .attr('text-anchor', 'middle')
+      .attr('dy', 4)
+      .attr('font-size', '12px')
+      .text('🚴');
+
+    // Animate traveler along the path
+    travelerGroup
+      .transition()
+      .delay(200)
+      .duration(0)
+      .attr('opacity', 1)
+      .transition()
+      .duration(2500)
+      .ease(d3.easeQuadInOut)
+      .attrTween('transform', () => {
+        return (t) => {
+          const point = pathOutline.node().getPointAtLength(t * totalLength);
+          return `translate(${point.x}, ${point.y - 20})`;
+        };
+      });
+
+    // Axes
+    g.append('g')
+      .attr('transform', `translate(0,${height})`)
+      .call(d3.axisBottom(xScale).tickFormat(d => d.toString()).ticks(6))
+      .selectAll('text')
+      .style('font-size', '12px')
+      .style('fill', '#4A5568');
+
+    g.append('g')
+      .call(d3.axisLeft(yScale).tickFormat(d => `£${d}M`))
+      .selectAll('text')
+      .style('font-size', '12px')
+      .style('fill', '#4A5568');
+
+    // Axis labels
+    g.append('text')
+      .attr('transform', `translate(${width / 2}, ${height + 45})`)
+      .style('text-anchor', 'middle')
+      .style('font-size', '13px')
+      .style('fill', '#4A5568')
+      .style('font-weight', '500')
+      .text('Year');
+
+    g.append('text')
+      .attr('transform', 'rotate(-90)')
+      .attr('y', -60)
+      .attr('x', -height / 2)
+      .style('text-anchor', 'middle')
+      .style('font-size', '13px')
+      .style('fill', '#4A5568')
+      .style('font-weight', '500')
+      .text('Physical Activity Benefit (Million GBP)');
+
+    // Tooltip
+    const tooltip = d3.select('body').append('div')
+      .style('position', 'fixed')
+      .style('opacity', 0)
+      .style('background', 'rgba(255, 255, 255, 0.98)')
+      .style('backdrop-filter', 'blur(12px)')
+      .style('border', '1px solid rgba(0, 0, 0, 0.1)')
+      .style('border-radius', '12px')
+      .style('padding', '12px 16px')
+      .style('font-size', '13px')
+      .style('pointer-events', 'none')
+      .style('box-shadow', '0 8px 24px rgba(0, 0, 0, 0.15)')
+      .style('z-index', '1000')
+      .style('font-family', 'Inter, sans-serif');
+
+    // Vertical guideline
+    const guideline = g.append('line')
+      .attr('stroke', '#6B7280')
+      .attr('stroke-width', 2)
+      .attr('stroke-dasharray', '4,4')
+      .attr('opacity', 0)
+      .attr('y1', 0)
+      .attr('y2', height);
+
+    // Traveler marker for hover
+    const hoverTraveler = g.append('g')
+      .attr('class', 'hover-traveler')
+      .attr('opacity', 0);
+
+    hoverTraveler.append('circle')
+      .attr('r', 10)
+      .attr('fill', '#EF4444')
+      .attr('stroke', '#FFF')
+      .attr('stroke-width', 3);
+
+    // Interactive overlay
+    const overlay = g.append('rect')
+      .attr('width', width)
+      .attr('height', height)
+      .attr('fill', 'none')
+      .attr('pointer-events', 'all')
+      .style('cursor', 'crosshair');
+
+    overlay.on('mousemove', function(event) {
+      const [mouseX] = d3.pointer(event);
+      const year = Math.round(xScale.invert(mouseX));
+      const dataPoint = data.find(d => d.year === year);
+
+      if (!dataPoint) return;
+
+      const x = xScale(year);
+      const y = yScale(dataPoint.physicalActivity);
+
+      // Show guideline
+      guideline
+        .attr('x1', x)
+        .attr('x2', x)
+        .attr('opacity', 1);
+
+      // Show hover traveler
+      hoverTraveler
+        .attr('transform', `translate(${x}, ${y})`)
+        .attr('opacity', 1);
+
+      // Calculate hospital admissions prevented (example conversion)
+      const admissionsPrevented = Math.round(dataPoint.physicalActivity * 100);
+
+      // Show tooltip
+      tooltip
+        .style('opacity', 1)
+        .style('left', `${event.pageX + 15}px`)
+        .style('top', `${event.pageY - 60}px`)
+        .html(`
+          <div style="font-weight: 600; margin-bottom: 6px; color: #10B981;">
+            Physical Activity Benefit
+          </div>
+          <div style="color: #4A5568; margin-bottom: 4px;">Year: ${year}</div>
+          <div style="color: #059669; font-weight: 600;">Health Value: £${dataPoint.physicalActivity.toFixed(2)}M</div>
+          <div style="color: #6B7280; font-size: 12px; margin-top: 4px;">
+            ≈ ${admissionsPrevented} hospital admissions prevented
+          </div>
+        `);
+    });
+
+    overlay.on('mouseleave', () => {
+      guideline.attr('opacity', 0);
+      hoverTraveler.attr('opacity', 0);
+      tooltip.style('opacity', 0);
+    });
+
+    // Cleanup on section change
+    const cleanupHandler = () => {
+      tooltip.remove();
     };
-
-    Plotly.react('viz-plot-active', traces, layout, this.plotlyConfig);
+    window.addEventListener('storyChange', cleanupHandler, { once: true });
   }
 
   renderQuietCities() {
